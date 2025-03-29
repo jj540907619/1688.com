@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>智能纸箱3D计算器</title>
+    <style>
+        body { margin: 0; font-family: Arial }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        input, select { width: 100px; margin: 5px }
+        button { background: #2196F3; color: white; border: none; padding: 8px 15px }
+        #result { 
+            margin-top: 15px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h3>参数设置</h3>
+        <select id="material">
+            <option value="5L">5层+5层</option>
+            <option value="3L">3层+5层</option>
+        </select><br>
+        <input type="number" id="length" placeholder="内箱长(mm)"><br>
+        <input type="number" id="width" placeholder="内箱宽(mm)"><br>
+        <input type="number" id="height" placeholder="内箱高(mm)"><br>
+        <input type="number" id="row" value="1" placeholder="横排"><br>
+        <input type="number" id="col" value="1" placeholder="竖排"><br>
+        <input type="number" id="stack" value="1" placeholder="堆叠"><br>
+        <button onclick="updateScene()">更新视图</button>
+        <div id="result">
+            <h4>外箱尺寸：</h4>
+            <div id="sizeResult">等待计算...</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        let scene, camera, renderer, controls;
+        let yellowMaterial, redMaterial;
+
+        function init() {
+            scene = new THREE.Scene();
+            
+            // 预定义材质
+            yellowMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xffff00,
+                transparent: true,
+                opacity: 0.8
+            });
+            redMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 10000);
+            camera.position.set(0, 1000, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // 光源设置
+            const light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(1000, 2000, 1000);
+            scene.add(light);
+            scene.add(new THREE.AmbientLight(0x404040));
+
+            // 控制器初始化
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 0, 0);
+
+            updateScene();
+            animate();
+        }
+
+        function updateScene() {
+            // 清除旧物体
+            scene.children.filter(obj => obj.isInnerBox).forEach(obj => scene.remove(obj));
+
+            // 获取参数
+            const params = {
+                material: document.getElementById('material').value,
+                length: parseInt(document.getElementById('length').value) || 100,
+                width: parseInt(document.getElementById('width').value) || 100,
+                height: parseInt(document.getElementById('height').value) || 100,
+                row: Math.max(parseInt(document.getElementById('row').value) || 1, 1),
+                col: Math.max(parseInt(document.getElementById('col').value) || 1, 1),
+                stack: Math.max(parseInt(document.getElementById('stack').value) || 1, 1)
+            };
+
+            // 计算外箱尺寸
+            const outer = calculateOuterBox(params);
+            document.getElementById('sizeResult').innerHTML = 
+                `长度：${outer.width}mm<br>
+                 宽度：${outer.depth}mm<br>
+                 高度：${outer.height}mm`;
+
+            // 创建内箱几何体（Y轴为垂直方向）
+            const innerGeometry = new THREE.BoxGeometry(
+                params.length,   // X轴
+                params.height,   // Y轴（高度）
+                params.width     // Z轴
+            );
+
+            // 间隙设置
+            const spacing = {
+                x: (params.row > 1) ? (params.material === '5L' ? 8 : 3) : 0,
+                z: (params.col > 1) ? (params.material === '5L' ? 8 : 3) : 0,
+                y: (params.stack > 1) ? (params.material === '5L' ? 8 : 3) : 0
+            };
+
+            // 计算总尺寸
+            const totalX = params.length * params.row + spacing.x * (params.row - 1);
+            const totalZ = params.width * params.col + spacing.z * (params.col - 1);
+            const totalY = params.height * params.stack + spacing.y * (params.stack - 1);
+
+            // 生成交替颜色的内箱
+            for(let x=0; x<params.row; x++) {
+                for(let z=0; z<params.col; z++) {
+                    for(let y=0; y<params.stack; y++) {
+                        // 使用三维坐标奇偶性判断颜色
+                        const isEven = (x + z + y) % 2 === 0;
+                        const material = isEven ? yellowMaterial : redMaterial;
+
+                        const innerBox = new THREE.Mesh(innerGeometry, material);
+                        innerBox.isInnerBox = true;
+                        
+                        // 定位计算（Y轴垂直方向）
+                        innerBox.position.set(
+                            x * (params.length + spacing.x) - totalX/2 + params.length/2,
+                            y * (params.height + spacing.y) - totalY/2 + params.height/2,
+                            z * (params.width + spacing.z) - totalZ/2 + params.width/2
+                        );
+                        
+                        scene.add(innerBox);
+                    }
+                }
+            }
+
+            // 自动调整视角
+            const maxDimension = Math.max(totalX, totalZ, totalY);
+            camera.position.set(maxDimension, maxDimension*2, maxDimension);
+            controls.update();
+        }
+
+        function calculateOuterBox(params) {
+            const isMulti = (params.row * params.col * params.stack) > 1;
+            
+            if(params.material === '5L') {
+                return {
+                    width: (params.length + (isMulti ? 5 : 0)) * params.row + 16,
+                    depth: (params.width + (isMulti ? 5 : 0)) * params.col + 16,
+                    height: (params.height + (isMulti ? 5 : 0)) * params.stack + 25
+                }
+            } else {
+                return {
+                    width: (params.length + (isMulti ? 1 : 0)) * params.row + 12,
+                    depth: (params.width + (isMulti ? 1 : 0)) * params.col + 12,
+                    height: (params.height + (isMulti ? 1 : 0)) * params.stack + 16
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onresize = function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+    </script>
+</body>
+</html>
